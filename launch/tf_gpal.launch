@@ -1,0 +1,21 @@
+<launch>
+
+    <param name ="/use_sim_time" value="true"/>
+    <node pkg="tf" type="static_transform_publisher" name="map_to_world" args="0 0 0 0 0 0 /world /map 10" />
+    
+    <node pkg="tf" type="static_transform_publisher" name="esr_can0_to_sensorbase" args="-0.25 0.1 0 2.77 0 0 /velodyne /esr_can0_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="esr_can1_to_sensorbase" args="-0.15 0.25 0 2.15 0 0 /velodyne /esr_can1_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="esr_can2_to_sensorbase" args="0 0.25 0 1.375 0 0 /velodyne /esr_can2_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="TI_0_to_sensorbase" args="-0.1 0.1 0 2.77 0 0 /velodyne /ti_0_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="TI_1_to_sensorbase" args="-0.1 0.1625 -0.45 2.15 0 0 /velodyne /ti_1_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="TI_2_to_sensorbase" args="0.15 0.12 0 1.375 0 0 /velodyne /ti_2_frame 100" />
+    <node pkg="tf" type="static_transform_publisher" name="imu_to_sensorbase" args="0 0 0 -4.2 0 0 /velodyne /imu 10" />
+    <node pkg="tf" type="static_transform_publisher" name="gps_to_sensorbase" args="-0.25 -0.1 0 -4.2 0 0 /velodyne /fix 10" />
+
+
+
+    <node pkg="tf" type="static_transform_publisher" name="radar_map_to_sensorbase" args="0 0 0 0 0 0 /velodyne /radar_map 100" />
+
+
+</launch>
+
