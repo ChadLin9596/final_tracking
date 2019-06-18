@@ -186,6 +186,9 @@ target_link_libraries(cluster_cloud ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${Boost
 
 add_executable(point_raw_transform src/point_raw_transform.cpp)
 target_link_libraries(point_raw_transform ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
+add_executable(predict_odometry src/predict_odometry.cpp)
+target_link_libraries(predict_odometry ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 #############
 ## Install ##
 #############
