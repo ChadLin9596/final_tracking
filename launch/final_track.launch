@@ -10,7 +10,7 @@
     <node pkg="final_tracking" type="ascanRegistration" name="ascanRegistration"/>
     <node pkg="final_tracking" type="alaserOdometry" name="alaserOdometry"/>
 
-    <node pkg="final_tracking" type="predict_odometry" name="predict_odometry"/>
+    <node pkg="final_tracking" type="predict_odometry" name="predict_odometry" output="screen"/>
 
     <!-- visualization -->
     <arg name="isRviz" default="true"/>

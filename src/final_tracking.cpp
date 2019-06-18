@@ -751,6 +751,9 @@ void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
   velocity[1] = msg->pose.pose.position.y;
   velocity[2] = msg->pose.pose.position.z;
 
+
+
+
 	if (number_targets > 0)
 	{
 		for (i = 0; i < number_targets; i++)
@@ -817,7 +820,7 @@ int main(int argc, char **argv)
 
     image_pub          = it.advertise("/camera/output", 1);
 
-    ros::Subscriber lidar_sub   = nh.subscribe("/points_raw", 100, ground_removal);
+    ros::Subscriber lidar_sub   = nh.subscribe("/points_transform", 100, ground_removal);
     ros::Subscriber imu_vel_sub = nh.subscribe("/predict/pos2", 100, updateTarget);
 
     //image_transport::Subscriber img_sub = it.subscribe("/camera/rgb/image_raw", 1, matching_method);
