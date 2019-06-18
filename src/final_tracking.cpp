@@ -82,6 +82,25 @@ using namespace boost::filesystem;
 
 // ParticleFilter::Ptr tracker_;
 
+
+typedef struct _track_pattern_{
+
+    std::vector<float> centroid;
+
+    pcl::PointCloud<pcl::PointXYZI> point_cloud;
+
+}_track_pattern;
+
+typedef struct _label_{
+
+    int index;
+
+    float distance;
+
+    double score;
+
+}_label;
+
 /* Private variable */
 //====================================================================================================
 
@@ -115,13 +134,20 @@ visualization_msgs::Marker line_strip_odom, line_strip_ekf_odom;
 
 pcl::PointCloud<pcl::PointXYZI>::Ptr prev_scan (new pcl::PointCloud<pcl::PointXYZI> );
 
-std::vector<std::vector<float> > centroid_series;
-std::vector<std::vector<float> > current_centroid;
+std::vector<Eigen::Vector4f> centroid_series;
+std::vector<Eigen::Vector4f> current_centroid;
+
+std::vector<std::vector<int> > track_label;
+
+std::vector<int > label_list;
 
 std::vector<pcl::PointCloud<pcl::PointXYZI> > pre_track_targets;
 std::vector<pcl::PointCloud<pcl::PointXYZI> > track_targets;
 
+std::vector<_track_pattern> track_patterns;
+
 //===================================================================================================
+
 
 
 /* Private function */
@@ -137,11 +163,14 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered);
 
 void updateTarget(const geometry_msgs::Twist::ConstPtr& msg);
 
-int compare_target(std::vector<float> centroid, 
-				   float* translate);
+int compareTarget(Eigen::Vector4f centroid, 
+                  float* translate,
+                  pcl::PointCloud<pcl::PointXYZI> target);
 
-void ICP_process(float* translate,
-				 const pcl::PointCloud<pcl::PointXYZI>::Ptr& current_scan);
+void gateAssociation();
+
+double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
+                 pcl::PointCloud<pcl::PointXYZI>& target);
 
 //===================================================================================================
 
@@ -314,6 +343,8 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
     std::vector<pcl::PointIndices> cluster_indices;
 
+    std::vector<int> labeled;
+
 	std::ostringstream os;
 
 	Eigen::Matrix3f covariance_matrix;
@@ -402,7 +433,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 		    		pre_track_targets.push_back(*cloud_cluster);
 		    		track_targets.push_back(*cloud_cluster);
 		    		
-		    		centroid_series.push_back(centroid_tmp);
+		    		centroid_series.push_back(centroid);
 
 			    	visualization_msgs::Marker marker;
 
@@ -437,7 +468,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 		    	{
 		    		track_targets.push_back(*cloud_cluster);
 
-		    		current_centroid.push_back(centroid_tmp);
+		    		current_centroid.push_back(centroid);
 
 		    	}
 
@@ -450,39 +481,39 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 		cloud_cluster->points.clear();
     }
 
-    clustering.setInputCloud(cloud_clusters);
-    clustering.extract(clusters);
+    // clustering.setInputCloud(cloud_clusters);
+    // clustering.extract(clusters);
 
-    if (!first_add)
-    {
+ //    if (!first_add)
+ //    {
 
-	    for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
-	    {
-	        pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
+	//     for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
+	//     {
+	//         pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
 
-	        for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
-	            cluster->points.push_back(cloud_clusters->points[*point]);
+	//         for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
+	//             cluster->points.push_back(cloud_clusters->points[*point]);
 
-	        cluster->width = cluster->points.size();
-	        cluster->height = 1;
-	        cluster->is_dense = true;
+	//         cluster->width = cluster->points.size();
+	//         cluster->height = 1;
+	//         cluster->is_dense = true;
 
-	        if (cluster->points.size() <= 0)
-	            break;
+	//         if (cluster->points.size() <= 0)
+	//             break;
 
-	        track_targets.push_back(*cluster);
+	//   //       track_targets.push_back(*cluster);
 
-	        pcl::compute3DCentroid(*cluster, centroid);
+	//   //       pcl::compute3DCentroid(*cluster, centroid);
 
-	        centroid_tmp[0] = centroid[0];
-			centroid_tmp[1] = centroid[1];
-			centroid_tmp[2] = centroid[2];
+	//   //       centroid_tmp[0] = centroid[0];
+	// 		// centroid_tmp[1] = centroid[1];
+	// 		// centroid_tmp[2] = centroid[2];
 
-			current_centroid.push_back(centroid_tmp);
+	// 		// current_centroid.push_back(centroid_tmp);
 
-	        *sec_cloud_clusters += *cluster;
-	    }
-	}
+	//         *sec_cloud_clusters += *cluster;
+	//     }
+	// }
 
     if (!first_add)
     {
@@ -490,9 +521,13 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
     	num = current_centroid.size();
 
+        label_list.clear();
+
     	for (i = 0; i < num; i++)
     	{
-    		idx = compare_target(current_centroid[i], translate);
+    		idx = compareTarget(current_centroid[i], translate, track_targets[i]);
+
+            labeled.push_back(idx);
 
     		visualization_msgs::Marker marker;
 
@@ -525,7 +560,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
     	}
     }
 
-    pcl::toROSMsg(*sec_cloud_clusters, clustered_cloud);
+    pcl::toROSMsg(*cloud_clusters, clustered_cloud);
 
     clustered_cloud.header.frame_id = "velodyne";
 
@@ -533,58 +568,128 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
     markerArrayPub.publish(centroid_array);
 
-    pre_track_targets.clear();
+    pcl::copyPointCloud(*cloud_clusters, *prev_scan);
 
-    pre_track_targets.assign(track_targets.begin(), track_targets.end());
-
-    pcl::copyPointCloud(*sec_cloud_clusters, *prev_scan);
+    if (first_add)
+    {
+        track_label.resize(track_targets.size());
+    }
 
     first_add = false;
 }
 
 //===================================================================================================
 
-int compare_target(std::vector<float> centroid, 
-				   float* translate)
+int compareTarget(Eigen::Vector4f centroid, 
+				  float* translate,
+                  pcl::PointCloud<pcl::PointXYZI> target)
 {
-	int i, idx;
+    static bool initialize = true;
 
+    bool break_flag = false;
+
+	int i, j, idx, num_list;
+    int track_num = 0;
 	int traget_num = centroid_series.size();
+    int K = 1;
 
-	float distance;
+    double score;
+    double min_score = DBL_MAX;
 
-	float min_distance = DBL_MAX;
+    float min_distance = DBL_MAX;
+
+	Eigen::MatrixXf distance(1,1);
+    Eigen::MatrixXf substraction(1, 3);
+    Eigen::Matrix3f covariance_matrix;
+
+    _label tmp_label;
 
 	std::vector<float> centroid_tmp(3);
 
+    std::vector<_label> target_label;
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tree (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+
+    pcl::PointXYZ searchPoint;
+
+    num_list = label_list.size();
+
+    std::vector<int> pointIdxNKNSearch(K);
+    std::vector<float> pointNKNSquaredDistance(K);
+
 	for (i = 0; i < traget_num; i++)
 	{
-		distance  = abs(centroid[0] - (centroid_series[i][0]));
-		distance += abs(centroid[1] - (centroid_series[i][1]));
-		//distance += abs(centroid[2] - (centroid_series[i][2]));
 
-		if (min_distance > distance)
+        substraction(0,0) = (centroid[0] - (centroid_series[i][0]));
+        substraction(0,1) = (centroid[1] - (centroid_series[i][1]));
+        substraction(0,2) = (centroid[2] - (centroid_series[i][2]));
+
+        pcl::computeCovarianceMatrix (pre_track_targets[i], centroid_series[i], covariance_matrix);
+
+        distance = substraction * covariance_matrix.inverse() * substraction.transpose();
+
+		if (distance(0,0) < 6.0f && distance(0,0) > 0.0f)
 		{
-			idx = i;
+            score = ICP_process(pre_track_targets[i], target);
 
-			min_distance = distance;
+            if (min_score > score)
+            {
+                min_score = score;
+                idx = i;
+
+                tmp_label.index = i;
+                tmp_label.score = score;
+                tmp_label.distance = abs(distance(0,0));
+
+                target_label.push_back(tmp_label);
+
+                track_num++;
+
+                // track_label[i].push_back(idx);
+            }
+
 		}
 	}
 
-	centroid_tmp[0] = centroid[0];
-	centroid_tmp[1] = centroid[1];
-	centroid_tmp[2] = centroid[2];
 
-	if (min_distance > 200)
+    if (track_num > 0)
+    {
+
+        tree->width = track_num;
+        tree->height = 1;
+
+        tree->points.resize(track_num);
+
+        for (i = 0; i < track_num; i++)
+        {
+            tree->points[i].x = target_label[i].score;
+            tree->points[i].y = target_label[i].score;
+            tree->points[i].z = target_label[i].score;
+        }
+
+        searchPoint.x = 0.0f;
+        searchPoint.y = 0.0f;
+        searchPoint.z = 0.0f;
+
+        kdtree.setInputCloud (tree);
+
+        if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
+        {
+            idx = pointIdxNKNSearch[0];
+        }
+    }
+
+	if (min_score > 0.2f)
 	{
 		idx = traget_num;
 
-		centroid_series.push_back(centroid_tmp);
+		centroid_series.push_back(centroid);
+
+        pre_track_targets.push_back(target);
 	}
-	else
-	{
-		centroid_series[idx] = centroid_tmp;
-	}
+
+    initialize = false;
 
 	return idx;
 
@@ -592,41 +697,41 @@ int compare_target(std::vector<float> centroid,
 
 //===================================================================================================
 
-void ICP_process(float* translate,
-				 const pcl::PointCloud<pcl::PointXYZI>::Ptr& current_scan)
+void gateAssociation()
+{
+
+
+
+
+}
+
+//===================================================================================================
+
+
+double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
+				   pcl::PointCloud<pcl::PointXYZI>& target)
 {
 	int i, j;
 	int pre_size, cur_size;
 
-	float max_score = DBL_MAX;
+	double max_score = DBL_MAX;
 
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
     pcl::PointCloud<pcl::PointXYZI> icp_result;
 
-	icp.setMaximumIterations (1000);
+	icp.setMaximumIterations (100);
 
-	pre_size = pre_track_targets.size();
-	cur_size = track_targets.size();
+    icp.setInputSource(input.makeShared());
+    icp.setInputTarget(target.makeShared());
 
-	for (i = 0; i < cur_size; i++)
-	{
-    	icp.setInputSource(pre_track_targets[0].makeShared());
-    	icp.setInputTarget(track_targets[i].makeShared());
+    icp.align(icp_result);
 
-	    icp.align(icp_result);
+    if (icp.hasConverged())
+    {
+        max_score = icp.getFitnessScore();
+    }
 
-	    if (icp.hasConverged() && (icp.getFitnessScore() < max_score))
-	    {
-	    	max_score = icp.getFitnessScore();
-
-	    	guess = icp.getFinalTransformation();
-	    }
-	}
-
-	*translate       = guess(0, 3);
-	*(translate + 1) = guess(1, 3);
-	*(translate + 2) = guess(2, 3);
-
+    return max_score;
 }
 
 //===================================================================================================
