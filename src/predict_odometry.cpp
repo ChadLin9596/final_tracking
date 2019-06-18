@@ -8,13 +8,14 @@
 #include <iostream>
 #include <string>
 #include <queue>
+#include <tf/transform_listener.h>
 #define GRAVITY 9.81
 
 typedef std::pair<std::vector<sensor_msgs::Imu>, std_msgs::Header> combinedData;
 typedef std::vector<combinedData> combinedDatas;
 
 nav_msgs::Odometry f2fodom1, f2fodom2;
-
+ros::Publisher pub_pos2;
 std::queue<sensor_msgs::Imu> imu_buf;
 std::queue<std_msgs::Header> header_buf;
 
@@ -172,6 +173,10 @@ void imuPropagate(Eigen::Vector3d &pos, Eigen::Vector3d &vel, Eigen::Matrix3d &r
   vel = vel + rot * acc * dt;
 }
 
+void cb_odom(const nav_msgs::Odometry::ConstPtr &msg){
+  f2fodom2 = *msg;
+}
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "predict_odometry");
@@ -179,11 +184,13 @@ int main(int argc, char **argv)
 
   ros::Subscriber sub_imu = nh.subscribe<sensor_msgs::Imu> ("/imu/data", 100, cb_imu);
   ros::Subscriber sub_point = nh.subscribe<sensor_msgs::PointCloud2> ("/points_raw", 100, cb_points);
+  ros::Subscriber sub_odom = nh.subscribe<nav_msgs::Odometry> ("/laserOdometry/laser_last_to_odom",100, cb_odom);
   ros::Publisher pub_pos1 = nh.advertise<nav_msgs::Odometry> ("/predict/pos1", 2);
-  ros::Publisher pub_pos2 = nh.advertise<nav_msgs::Odometry> ("/predict/pos2", 2);
+  pub_pos2 = nh.advertise<nav_msgs::Odometry> ("/predict/pos2", 2);
 
   std_msgs::Header header;
   sensor_msgs::Imu imu_last;
+  Eigen::Vector3d vel_last(0,0,0);
   ros::Rate rate(10);
   while(ros::ok()){
     if (!imu_buf.empty() && !header_buf.empty()){
@@ -196,11 +203,11 @@ int main(int argc, char **argv)
         Eigen::Vector3d pos, vel;
         Eigen::Matrix3d rot;
         initState(pos, vel, rot);
-
+        vel = vel_last;
         // Mainly do imu propagate
         if(!systemInit){
-          systemInit = true;
           header = measurement[0].second;
+          systemInit = true;
           // initial vel update
           for(int i = 0; i < measurement[0].first.size(); i++){
             sensor_msgs::Imu imu = measurement[0].first[i];
@@ -216,6 +223,7 @@ int main(int argc, char **argv)
             imuPropagate(pos, vel, rot, acc, gyr, dt);
             imu_last = imu;
           }
+          vel_last = vel;
         } else {
           // propagate
           for(int i = 0; i < measurement[0].first.size(); i++){
@@ -227,9 +235,11 @@ int main(int argc, char **argv)
                                 0.5 * (imu.angular_velocity.y + imu_last.angular_velocity.y),
                                 0.5 * (imu.angular_velocity.z + imu_last.angular_velocity.z));
             double dt = imu.header.stamp.toSec() - imu_last.header.stamp.toSec();
+//            std::cout << "dt : " << dt << std::endl;
             imuPropagate(pos, vel, rot, acc, gyr, dt);
             imu_last = imu;
           }
+          vel_last = vel;
           Eigen::Quaterniond q(rot);
           f2fodom1.header = header;
           f2fodom1.child_frame_id = "velodyne_current";
@@ -241,9 +251,17 @@ int main(int argc, char **argv)
           f2fodom1.pose.pose.orientation.z = q.z();
           f2fodom1.pose.pose.orientation.w = q.w();
 
+          if(f2fodom2.header.stamp.toSec() == measurement[0].second.stamp.toSec()){
+            f2fodom2.header = header;
+            Eigen::Vector3d pos2(f2fodom2.pose.pose.position.x, f2fodom2.pose.pose.position.y, f2fodom2.pose.pose.position.z);
+            std::cout << "check point OK" << std::endl;
+            std::cout << "pose1 : " << pos.transpose() << std::endl;
+            std::cout << "pose2 : " << pos2.transpose() << std::endl;
+          }
           // publish data
           pub_pos1.publish(f2fodom1);
           pub_pos2.publish(f2fodom2);
+          header = measurement[0].second;
         }
       }
     }

@@ -65,7 +65,7 @@
 #include <image_transport/image_transport.h>
 
 #include <cv_bridge/cv_bridge.h>
-
+#include <nav_msgs/Odometry.h>
 using namespace boost::filesystem;
 
 //====================================================================================================
@@ -161,7 +161,7 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg);
 
 void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered);
 
-void updateTarget(const geometry_msgs::Twist::ConstPtr& msg);
+void updateTarget(const nav_msgs::Odometry::ConstPtr& msg);
 
 int compareTarget(Eigen::Vector4f centroid, 
                   float* translate,
@@ -653,32 +653,32 @@ int compareTarget(Eigen::Vector4f centroid,
 	}
 
 
-    if (track_num > 0)
-    {
+//    if (track_num > 0)
+//    {
 
-        tree->width = track_num;
-        tree->height = 1;
+//        tree->width = track_num;
+//        tree->height = 1;
 
-        tree->points.resize(track_num);
+//        tree->points.resize(track_num);
 
-        for (i = 0; i < track_num; i++)
-        {
-            tree->points[i].x = target_label[i].score;
-            tree->points[i].y = target_label[i].score;
-            tree->points[i].z = target_label[i].score;
-        }
+//        for (i = 0; i < track_num; i++)
+//        {
+//            tree->points[i].x = target_label[i].score;
+//            tree->points[i].y = target_label[i].score;
+//            tree->points[i].z = target_label[i].score;
+//        }
 
-        searchPoint.x = 0.0f;
-        searchPoint.y = 0.0f;
-        searchPoint.z = 0.0f;
+//        searchPoint.x = 0.0f;
+//        searchPoint.y = 0.0f;
+//        searchPoint.z = 0.0f;
 
-        kdtree.setInputCloud (tree);
+//        kdtree.setInputCloud (tree);
 
-        if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
-        {
-            idx = pointIdxNKNSearch[0];
-        }
-    }
+//        if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
+//        {
+//            idx = pointIdxNKNSearch[0];
+//        }
+//    }
 
 	if (min_score > 0.2f)
 	{
@@ -736,7 +736,7 @@ double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
 
 //===================================================================================================
 
-void updateTarget(const geometry_msgs::Twist::ConstPtr& msg)
+void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
 {
 	int i, k, num_pts, number_targets;
 
@@ -744,11 +744,12 @@ void updateTarget(const geometry_msgs::Twist::ConstPtr& msg)
 
 	pcl::PointCloud<pcl::PointXYZI>::Ptr predict_points (new pcl::PointCloud<pcl::PointXYZI>);
 
+  std::cout << "receive predict" << std::endl;
 	number_targets = pre_track_targets.size();
 
-	velocity[0] = msg->linear.x;
-	velocity[1] = msg->linear.y;
-	velocity[2] = msg->linear.z;
+  velocity[0] = msg->pose.pose.position.x;
+  velocity[1] = msg->pose.pose.position.y;
+  velocity[2] = msg->pose.pose.position.z;
 
 	if (number_targets > 0)
 	{
@@ -758,8 +759,8 @@ void updateTarget(const geometry_msgs::Twist::ConstPtr& msg)
 
 			for (k = 0; k < num_pts; k++)
 			{
-				pre_track_targets[i].points[k].x -= 100*velocity[0];
-				pre_track_targets[i].points[k].y -= 100*velocity[1];
+        pre_track_targets[i].points[k].x -= velocity[0];
+        pre_track_targets[i].points[k].y -= velocity[1];
 				pre_track_targets[i].points[k].z -= velocity[2];
 			}
 
@@ -816,8 +817,8 @@ int main(int argc, char **argv)
 
     image_pub          = it.advertise("/camera/output", 1);
 
-    ros::Subscriber lidar_sub   = nh.subscribe("/points_raw", 1, ground_removal);
-    ros::Subscriber imu_vel_sub = nh.subscribe("/imu_velocity", 1, updateTarget);
+    ros::Subscriber lidar_sub   = nh.subscribe("/points_raw", 100, ground_removal);
+    ros::Subscriber imu_vel_sub = nh.subscribe("/predict/pos2", 100, updateTarget);
 
     //image_transport::Subscriber img_sub = it.subscribe("/camera/rgb/image_raw", 1, matching_method);
 
