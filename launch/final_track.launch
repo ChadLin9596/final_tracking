@@ -7,8 +7,8 @@
 
     <param name="minimum_range" type="double" value="0.3"/>
     <param name="scan_line" type="int" value="32" />
-    <node pkg="final_localization" type="scanRegistration" name="scanRegistration"/>
-    <node pkg="final_localization" type="laserOdometry" name="laserOdometry"/>
+    <node pkg="final_tracking" type="ascanRegistration" name="ascanRegistration"/>
+    <node pkg="final_tracking" type="alaserOdometry" name="alaserOdometry"/>
 
     <node pkg="final_tracking" type="predict_odometry" name="predict_odometry"/>
 
