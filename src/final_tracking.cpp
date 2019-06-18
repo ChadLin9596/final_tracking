@@ -67,7 +67,16 @@
 #include <cv_bridge/cv_bridge.h>
 #include <nav_msgs/Odometry.h>
 using namespace boost::filesystem;
-
+/* Parameter setting*/
+//===================================================================================================
+double cluster_tolerance;
+int MinClusterSize;
+int MaxClusterSize;
+double matrix_00;
+double matrix_01;
+double matrix_10;
+double matrix_11;
+//====================================================================================================
 //====================================================================================================
 
 /* Private definition */
@@ -420,7 +429,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
 	    	pcl::computeCovarianceMatrix (*cloud_cluster, centroid, covariance_matrix);
 
-	    	if (abs(covariance_matrix(0,1)) < 500)
+                if ((abs(covariance_matrix(0,0)) < matrix_00) && (abs(covariance_matrix(0,1)) < matrix_01) && (abs(covariance_matrix(1,0)) < matrix_10) && (abs(covariance_matrix(1,1)) < matrix_11))
 	    	{
 		    	*cloud_clusters += *cloud_cluster;
 
@@ -795,6 +804,13 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "final_tracking");
     ros::NodeHandle nh;
+    nh.param<double>("cluster_tolerance",cluster_tolerance,0.4);
+    nh.param<int>("MinClusterSize",MinClusterSize,50);
+    nh.param<int>("MaxClusterSize",MaxClusterSize,2000);
+    nh.param<double>("matrix_00",matrix_00,500);
+    nh.param<double>("matrix_01",matrix_01,500);
+    nh.param<double>("matrix_10",matrix_10,500);
+    nh.param<double>("matrix_11",matrix_11,500);
     image_transport::ImageTransport it(nh);
 
     line_strip_odom.header.frame_id = "velodyne";
