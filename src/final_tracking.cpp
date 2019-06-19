@@ -175,7 +175,8 @@ void matching_method(const sensor_msgs::ImageConstPtr& msg);
 
 void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg);
 
-void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered);
+void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
+                ros::Time&                                  time_stamp);
 
 void updateTarget(const nav_msgs::Odometry::ConstPtr& msg);
 
@@ -280,6 +281,7 @@ void matching_method(const sensor_msgs::ImageConstPtr& msg)
 
 void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg) 
 {
+    ros::Time time_stamp = msg->header.stamp;
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
     fromROSMsg(*msg, *cloud);
@@ -336,12 +338,13 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
     plane_filtered_pub.publish(filtered_cloud);
 
     
-    clustering(cloud_filtered);
+    clustering(cloud_filtered, time_stamp);
 }
 
 //===================================================================================================
 
-void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
+void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
+                ros::Time&                                  time_stamp)
 {
 	int j = 50;
     int k = 0;
@@ -370,8 +373,6 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
     sensor_msgs::PointCloud2 clustered_cloud;
 
     visualization_msgs::MarkerArray centroid_array;
-
-    ros::Time begin = ros::Time::now();
 
     pcl::EuclideanClusterExtraction<pcl::PointXYZI> euclidean_cluster;
 
@@ -456,7 +457,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 			    	visualization_msgs::Marker marker;
 
 			        marker.header.frame_id = "velodyne"; 
-			        marker.header.stamp = begin; 
+			        marker.header.stamp = time_stamp; 
 			        marker.ns = "basic_shapes"; 
 			        marker.action = visualization_msgs::Marker::ADD; 
 			        marker.pose.orientation.w = 1.0; 
@@ -554,7 +555,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
     		visualization_msgs::Marker marker;
 
 	        marker.header.frame_id = "velodyne"; 
-	        marker.header.stamp = begin; 
+	        marker.header.stamp = time_stamp; 
 	        marker.ns = "basic_shapes"; 
 	        marker.action = visualization_msgs::Marker::ADD; 
 	        marker.pose.orientation.w = 1.0; 
