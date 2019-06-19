@@ -4,13 +4,13 @@
     <node pkg="final_tracking" type="point_raw_transform" name="point_raw_transfrom"/>
 
     <group if="true">
-    <param name="cluster_tolerance" type="double" value="0.5"/>
-    <param name="MinClusterSize" type="int" value="100"/>
-    <param name="MaxClusterSize" type="int" value="500"/>
-    <param name="matrix_00" type="double" value="0.5"/>
-    <param name="matrix_01" type="double" value="0.5"/>
-    <param name="matrix_10" type="double" value="0.5"/>
-    <param name="matrix_11" type="double" value="0.5"/>
+    <param name="cluster_tolerance" type="double" value="0.4"/>
+    <param name="MinClusterSize" type="int" value="50"/>
+    <param name="MaxClusterSize" type="int" value="2000"/>
+    <param name="matrix_00" type="double" value="500"/>
+    <param name="matrix_01" type="double" value="500"/>
+    <param name="matrix_10" type="double" value="500"/>
+    <param name="matrix_11" type="double" value="500"/>
     <node pkg="final_tracking" type="final_tracking" name="final_tracking" output="screen"/>
     </group>
 
