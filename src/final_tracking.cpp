@@ -11,8 +11,11 @@
 #include <iomanip>
 #include <time.h>
 #include <math.h>
+#include <fstream>
+#include <sstream>
 
 #include <ros/ros.h>
+#include <ros/package.h>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -154,6 +157,10 @@ std::vector<pcl::PointCloud<pcl::PointXYZI> > pre_track_targets;
 std::vector<pcl::PointCloud<pcl::PointXYZI> > track_targets;
 
 std::vector<_track_pattern> track_patterns;
+
+std::vector<visualization_msgs::Marker> record;
+
+std::ofstream file;
 
 //===================================================================================================
 
@@ -364,6 +371,8 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
     visualization_msgs::MarkerArray centroid_array;
 
+    ros::Time begin = ros::Time::now();
+
     pcl::EuclideanClusterExtraction<pcl::PointXYZI> euclidean_cluster;
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_clusters (new pcl::PointCloud<pcl::PointXYZI>);
@@ -447,7 +456,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 			    	visualization_msgs::Marker marker;
 
 			        marker.header.frame_id = "velodyne"; 
-			        marker.header.stamp = ros::Time::now(); 
+			        marker.header.stamp = begin; 
 			        marker.ns = "basic_shapes"; 
 			        marker.action = visualization_msgs::Marker::ADD; 
 			        marker.pose.orientation.w = 1.0; 
@@ -471,7 +480,11 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 		            marker.pose.position.y = centroid[1];
 		            marker.pose.position.z = centroid[2];
 
+                    record.push_back(marker);
+
 		            centroid_array.markers.push_back(marker);
+
+                    file << marker.header.stamp << ", " << counter << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
 		    	}
 		    	else
 		    	{
@@ -541,7 +554,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
     		visualization_msgs::Marker marker;
 
 	        marker.header.frame_id = "velodyne"; 
-	        marker.header.stamp = ros::Time::now(); 
+	        marker.header.stamp = begin; 
 	        marker.ns = "basic_shapes"; 
 	        marker.action = visualization_msgs::Marker::ADD; 
 	        marker.pose.orientation.w = 1.0; 
@@ -565,8 +578,12 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
             marker.pose.position.y = current_centroid[i][1];
             marker.pose.position.z = current_centroid[i][2];
 
+            record.push_back(marker);
+
             centroid_array.markers.push_back(marker);
+            file << marker.header.stamp << ", " << idx << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
     	}
+
     }
 
     pcl::toROSMsg(*cloud_clusters, clustered_cloud);
@@ -802,6 +819,8 @@ void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
 
 int main(int argc, char **argv) 
 {
+    std::string folder_path;
+
     ros::init(argc, argv, "final_tracking");
     ros::NodeHandle nh;
     nh.param<double>("cluster_tolerance",cluster_tolerance,0.4);
@@ -839,6 +858,11 @@ int main(int argc, char **argv)
     ros::Subscriber lidar_sub   = nh.subscribe("/points_transform", 100, ground_removal);
     ros::Subscriber imu_vel_sub = nh.subscribe("/predict/pos2", 100, updateTarget);
 
+    folder_path = ros::package::getPath("final_tracking");
+    folder_path += "/output.csv";
+
+    file.open(folder_path);
+
     //image_transport::Subscriber img_sub = it.subscribe("/camera/rgb/image_raw", 1, matching_method);
 
     initializeGlobalParams();
@@ -848,5 +872,7 @@ int main(int argc, char **argv)
         loop_rate.sleep();
         ros::spinOnce();
     }
+
+
 }
 
