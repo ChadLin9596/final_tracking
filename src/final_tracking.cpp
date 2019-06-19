@@ -389,9 +389,9 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered)
 
     tree->setInputCloud (cloud_filtered);
 
-    euclidean_cluster.setClusterTolerance (0.4); // 50cm
-    euclidean_cluster.setMinClusterSize (50);
-    euclidean_cluster.setMaxClusterSize (5000);
+    euclidean_cluster.setClusterTolerance (cluster_tolerance); 
+    euclidean_cluster.setMinClusterSize (MinClusterSize);
+    euclidean_cluster.setMaxClusterSize (MaxClusterSize);
     euclidean_cluster.setSearchMethod (tree);
     euclidean_cluster.setInputCloud (cloud_filtered);
     euclidean_cluster.extract (cluster_indices);
