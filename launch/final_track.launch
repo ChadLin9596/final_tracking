@@ -5,12 +5,16 @@
 
     <group if="true">
     <param name="cluster_tolerance" type="double" value="0.4"/>
-    <param name="MinClusterSize" type="int" value="50"/>
-    <param name="MaxClusterSize" type="int" value="2000"/>
-    <param name="matrix_00" type="double" value="500"/>
-    <param name="matrix_01" type="double" value="500"/>
-    <param name="matrix_10" type="double" value="500"/>
-    <param name="matrix_11" type="double" value="500"/>
+    <param name="MinClusterSize" type="int" value="20"/>
+    <param name="MaxClusterSize" type="int" value="500"/>
+    <param name="matrix_00" type="double" value="2"/>
+    <param name="matrix_00_" type="double" value="250"/>
+    <param name="matrix_01" type="double" value="2"/>
+    <param name="matrix_10" type="double" value="2"/>
+    <param name="matrix_11" type="double" value="2"/>
+    <param name="matrix_11_" type="double" value="250"/>
+    <param name="matrix_20" type="double" value="2"/>
+    <param name="matrix_21" type="double" value="2"/>
     <node pkg="final_tracking" type="final_tracking" name="final_tracking" output="screen"/>
     </group>
 

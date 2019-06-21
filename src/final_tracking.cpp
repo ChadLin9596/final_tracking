@@ -76,9 +76,13 @@ double cluster_tolerance;
 int MinClusterSize;
 int MaxClusterSize;
 double matrix_00;
+double matrix_00_;
 double matrix_01;
 double matrix_10;
 double matrix_11;
+double matrix_11_;
+double matrix_20;
+double matrix_21;
 //====================================================================================================
 //====================================================================================================
 
@@ -438,8 +442,8 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 		    j+=2;
 
 	    	pcl::computeCovarianceMatrix (*cloud_cluster, centroid, covariance_matrix);
-
-                if ((abs(covariance_matrix(0,0)) < matrix_00) && (abs(covariance_matrix(0,1)) < matrix_01) && (abs(covariance_matrix(1,0)) < matrix_10) && (abs(covariance_matrix(1,1)) < matrix_11))
+                std::cout<<covariance_matrix<<std::endl;
+                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_)&& (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
 	    	{
 		    	*cloud_clusters += *cloud_cluster;
 
@@ -828,9 +832,13 @@ int main(int argc, char **argv)
     nh.param<int>("MinClusterSize",MinClusterSize,50);
     nh.param<int>("MaxClusterSize",MaxClusterSize,2000);
     nh.param<double>("matrix_00",matrix_00,500);
+    nh.param<double>("matrix_00_",matrix_00_,500);
     nh.param<double>("matrix_01",matrix_01,500);
     nh.param<double>("matrix_10",matrix_10,500);
     nh.param<double>("matrix_11",matrix_11,500);
+    nh.param<double>("matrix_11_",matrix_11_,500);
+    nh.param<double>("matrix_20",matrix_20,500);
+    nh.param<double>("matrix_21",matrix_21,500);
     image_transport::ImageTransport it(nh);
 
     line_strip_odom.header.frame_id = "velodyne";
