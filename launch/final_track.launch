@@ -24,7 +24,7 @@
     <node pkg="final_tracking" type="alaserOdometry" name="alaserOdometry"/>
 
     <node pkg="final_tracking" type="predict_odometry" name="predict_odometry" output="screen"/>
-
+    <node pkg="final_tracking" type="bounding_box_visualize" name="bounding_box_visualize" output="screen"/>
     <!-- visualization -->
     <arg name="isRviz" default="true"/>
     <group if="$(arg isRviz)">
@@ -34,7 +34,11 @@
 
     <arg name="isRqt" default="false"/>
     <group if="$(arg isRqt)">
-        <arg name="plot_topic" default="/predict/pos1/pose/pose/position"/>
-        <node pkg="rqt_plot" type="rqt_plot" name="rqt_plot1" args="$(arg plot_topic)"/>
+        <arg name="plot_topic1" default="/predict/pos1/pose/pose/position"/>
+        <node pkg="rqt_plot" type="rqt_plot" name="rqt_plot1" args="$(arg plot_topic1)"/>
+        <arg name="plot_topic2" default="/predict/pos2/pose/pose/position"/>
+        <node pkg="rqt_plot" type="rqt_plot" name="rqt_plot2" args="$(arg plot_topic2)"/>
+        <arg name="plot_topic3" default="/imu/data/linear_acceleration"/>
+        <node pkg="rqt_plot" type="rqt_plot" name="rqt_plot3" args="$(arg plot_topic3)"/>
     </group>
 </launch>

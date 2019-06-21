@@ -195,6 +195,9 @@ target_link_libraries(ascanRegistration ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 add_executable(alaserOdometry src/laserOdometry.cpp)
 target_link_libraries(alaserOdometry ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
+add_executable(bounding_box_visualize src/bounding_box_visualize.cpp)
+target_link_libraries(bounding_box_visualize ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 #############
 ## Install ##
 #############
