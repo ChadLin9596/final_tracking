@@ -4,17 +4,20 @@
     <node pkg="final_tracking" type="point_raw_transform" name="point_raw_transfrom"/>
 
     <group if="true">
-    <param name="cluster_tolerance" type="double" value="0.4"/>
-    <param name="MinClusterSize" type="int" value="20"/>
-    <param name="MaxClusterSize" type="int" value="500"/>
-    <param name="matrix_00" type="double" value="2"/>
-    <param name="matrix_00_" type="double" value="250"/>
-    <param name="matrix_01" type="double" value="2"/>
-    <param name="matrix_10" type="double" value="2"/>
-    <param name="matrix_11" type="double" value="2"/>
-    <param name="matrix_11_" type="double" value="250"/>
-    <param name="matrix_20" type="double" value="2"/>
-    <param name="matrix_21" type="double" value="2"/>
+    <param name="cluster_tolerance" type="double" value="0.45"/>
+    <param name="MinClusterSize" type="int" value="45"/>
+    <param name="MaxClusterSize" type="int" value="2000"/>
+    <param name="matrix_00" type="double" value="0"/>
+    <param name="matrix_00_" type="double" value="80"/>
+    <param name="matrix_01" type="double" value="5000"/>
+    <param name="matrix_10" type="double" value="5000"/>
+    <param name="matrix_11" type="double" value="0"/>
+    <param name="matrix_11_" type="double" value="1000"/>
+    <param name="matrix_20" type="double" value="5000"/>
+    <param name="matrix_21" type="double" value="5000"/>
+    <param name="std_low" type="double" value="0"/>
+    <param name="std_high" type="double" value="1000"/>
+
     <node pkg="final_tracking" type="final_tracking" name="final_tracking" output="screen"/>
     </group>
 
@@ -23,8 +26,9 @@
     <node pkg="final_tracking" type="ascanRegistration" name="ascanRegistration"/>
     <node pkg="final_tracking" type="alaserOdometry" name="alaserOdometry"/>
 
-    <node pkg="final_tracking" type="predict_odometry" name="predict_odometry" output="screen"/>
-    <node pkg="final_tracking" type="bounding_box_visualize" name="bounding_box_visualize" output="screen"/>
+    <node pkg="final_tracking" type="predict_odometry" name="predict_odometry"/>
+    <!--<node pkg="final_tracking" type="bounding_box_visualize" name="bounding_box_visualize" output="screen"/>-->
+
     <!-- visualization -->
     <arg name="isRviz" default="true"/>
     <group if="$(arg isRviz)">

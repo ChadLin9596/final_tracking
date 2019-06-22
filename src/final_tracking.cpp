@@ -83,6 +83,8 @@ double matrix_11;
 double matrix_11_;
 double matrix_20;
 double matrix_21;
+double std_low;
+double std_high;
 //====================================================================================================
 //====================================================================================================
 
@@ -184,7 +186,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
 void updateTarget(const nav_msgs::Odometry::ConstPtr& msg);
 
-int compareTarget(Eigen::Vector4f centroid, 
+int compareTarget(Eigen::Vector4f centroid,
                   float* translate,
                   pcl::PointCloud<pcl::PointXYZI> target);
 
@@ -195,10 +197,10 @@ double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
 
 //===================================================================================================
 
-void initializeGlobalParams() 
+void initializeGlobalParams()
 {
     l_t_c << 0.84592974185943604, 0.53328412771224976, -0.0033089336939156055, 0.092240132391452789,
-           0.045996580272912979, -0.079141519963741302, -0.99580162763595581, -0.35709697008132935, 
+           0.045996580272912979, -0.079141519963741302, -0.99580162763595581, -0.35709697008132935,
            -0.53130710124969482, 0.84222602844238281, -0.091477409005165100, -0.16055910289287567,
            0, 0, 0, 1;
 
@@ -233,57 +235,57 @@ void initializeGlobalParams()
 
 void matching_method(const sensor_msgs::ImageConstPtr& msg)
 {
-	static bool initiailize = false;
+        static bool initiailize = false;
 
-	int rows, cols;
+        int rows, cols;
 
-	double minVal; 
+        double minVal;
 
     cv::Point minLoc;
 
-	cv::Mat current_frame, half_match_img, half_compare_img, temp, result;
-	cv::Mat gray_frame;
+        cv::Mat current_frame, half_match_img, half_compare_img, temp, result;
+        cv::Mat gray_frame;
 
-	cv_bridge::CvImagePtr cv_ptr;
+        cv_bridge::CvImagePtr cv_ptr;
 
-	cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
 
-	current_frame = cv_ptr->image.clone();
+        current_frame = cv_ptr->image.clone();
 
-	cv::cvtColor(current_frame, gray_frame, CV_BGR2GRAY);
+        cv::cvtColor(current_frame, gray_frame, CV_BGR2GRAY);
 
-	rows = current_frame.rows>>2;
-	cols = current_frame.cols>>2;
+        rows = current_frame.rows>>2;
+        cols = current_frame.cols>>2;
 
-	std::cout << rows << " " << cols <<std::endl;
+        std::cout << rows << " " << cols <<std::endl;
 
-	if (initiailize)
-	{
+        if (initiailize)
+        {
 
-		cv::cvtColor(match_frame(cv::Rect(cols>>1, rows>>1, cols, rows)), temp, CV_BGR2GRAY);
+                cv::cvtColor(match_frame(cv::Rect(cols>>1, rows>>1, cols, rows)), temp, CV_BGR2GRAY);
 
-		cv::cvtColor(current_frame(cv::Rect(0, 0, match_frame.cols>>1, match_frame.rows>>1)), half_compare_img, CV_BGR2GRAY);
+                cv::cvtColor(current_frame(cv::Rect(0, 0, match_frame.cols>>1, match_frame.rows>>1)), half_compare_img, CV_BGR2GRAY);
 
-		cv::matchTemplate(half_compare_img, temp, result, CV_TM_SQDIFF);
+                cv::matchTemplate(half_compare_img, temp, result, CV_TM_SQDIFF);
 
-		cv::minMaxLoc(result, &minVal, 0, &minLoc, 0);
+                cv::minMaxLoc(result, &minVal, 0, &minLoc, 0);
 
-		cv::rectangle(gray_frame, minLoc, cv::Point(minLoc.x+temp.cols , minLoc.y+temp.rows), cv::Scalar::all(0), 3);
+                cv::rectangle(gray_frame, minLoc, cv::Point(minLoc.x+temp.cols , minLoc.y+temp.rows), cv::Scalar::all(0), 3);
 
-	}
+        }
 
-	match_frame = cv_ptr->image.clone();
+        match_frame = cv_ptr->image.clone();
 
-	initiailize = true;
+        initiailize = true;
 
-	sensor_msgs::ImagePtr img_msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", gray_frame).toImageMsg();
+        sensor_msgs::ImagePtr img_msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", gray_frame).toImageMsg();
 
-	image_pub.publish(img_msg);
+        image_pub.publish(img_msg);
 }
 
 //===================================================================================================
 
-void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg) 
+void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
     ros::Time time_stamp = msg->header.stamp;
 
@@ -316,9 +318,9 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
     // Segment ground plane
     seg.setInputCloud (cloud_filtered);
     seg.segment (*inliers, *coefficients);
-    if (inliers->indices.size () == 0) 
+    if (inliers->indices.size () == 0)
     {
-    	std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
+        std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
     }
 
     // Extract the plane inliers from the input cloud
@@ -341,7 +343,7 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
     filtered_cloud.header.frame_id = "velodyne";
     plane_filtered_pub.publish(filtered_cloud);
 
-    
+
     clustering(cloud_filtered, time_stamp);
 }
 
@@ -350,28 +352,17 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
 void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
                 ros::Time&                                  time_stamp)
 {
-	int j = 50;
-    int k = 0;
+    int j = 50;
     int i, idx, num;
-
     int counter = 0;
-
     float translate[3] = {0, 0, 0};
-
-	static bool first_add = true;
-
-	bool over_height = false;
-
-	std::vector<float> centroid_tmp(3);
-
+    static bool first_add = true;
+    bool over_height = false;
+    std::vector<float> centroid_tmp(3);
     std::vector<pcl::PointIndices> cluster_indices;
-
     std::vector<int> labeled;
-
-	std::ostringstream os;
-
-	Eigen::Matrix3f covariance_matrix;
-
+    std::ostringstream os;
+    Eigen::Matrix3f covariance_matrix;
     Eigen::Vector4f centroid;
 
     sensor_msgs::PointCloud2 clustered_cloud;
@@ -403,109 +394,152 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
     tree->setInputCloud (cloud_filtered);
 
-    euclidean_cluster.setClusterTolerance (cluster_tolerance); 
+    euclidean_cluster.setClusterTolerance (cluster_tolerance);
     euclidean_cluster.setMinClusterSize (MinClusterSize);
     euclidean_cluster.setMaxClusterSize (MaxClusterSize);
     euclidean_cluster.setSearchMethod (tree);
     euclidean_cluster.setInputCloud (cloud_filtered);
     euclidean_cluster.extract (cluster_indices);
 
+
     track_targets.clear();
     current_centroid.clear();
 
-    for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it) 
+    for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
     {
 
-	    for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit) 
-	    {
-	    	cloud_filtered->points[*pit].intensity = j;
+            for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+            {
+                cloud_filtered->points[*pit].intensity = j;
 
-	    	cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
+                cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
 
-	    	if (cloud_filtered->points[*pit].z > 0.2f)
-	    	{
-	    		over_height = true;
+                if (cloud_filtered->points[*pit].z > 1.2f)
+                {
+                        over_height = true;
 
-	    		break;
-	    	}
-	    }
+                        break;
+                }
+            }
 
-	    if (!over_height)
-	    {
+            if (!over_height)
+            {
 
-		    cloud_cluster->width = cloud_cluster->points.size();
-		    cloud_cluster->height = 1;
-		    cloud_cluster->is_dense = true;
+                cloud_cluster->width = cloud_cluster->points.size();
+                cloud_cluster->height = 1;
+                cloud_cluster->is_dense = true;
+                j+=2;
 
-		    pcl::compute3DCentroid(*cloud_cluster, centroid);
+                //PCA
+                pcl::compute3DCentroid(*cloud_cluster, centroid);
+                pcl::computeCovarianceMatrix (*cloud_cluster, centroid, covariance_matrix);
+                Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
+                Eigen::Matrix3f eigenVectorsPCA = eigen_solver.eigenvectors();
+                Eigen::Vector3f eigenValuesPCA = eigen_solver.eigenvalues();
 
-		    j+=2;
 
-	    	pcl::computeCovarianceMatrix (*cloud_cluster, centroid, covariance_matrix);
-                std::cout<<covariance_matrix<<std::endl;
-                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_)&& (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
-	    	{
-		    	*cloud_clusters += *cloud_cluster;
+                Eigen::Matrix4f transform(Eigen::Matrix4f::Identity());
+                transform.block<3, 3>(0, 0) = eigenVectorsPCA.transpose();
+                transform.block<3, 1>(0, 3) = -1.0f * (transform.block<3,3>(0,0)) * (centroid.head<3>());
 
-	    		centroid_tmp[0] = centroid[0];
-	    		centroid_tmp[1] = centroid[1];
-	    		centroid_tmp[2] = centroid[2];
+                pcl::PointCloud<pcl::PointXYZI>::Ptr transformedCloud(new pcl::PointCloud<pcl::PointXYZI>);
+                pcl::transformPointCloud(*cloud_cluster, *transformedCloud, transform);
 
-		    	if (first_add)
-		    	{
-		    		pre_track_targets.push_back(*cloud_cluster);
-		    		track_targets.push_back(*cloud_cluster);
-		    		
-		    		centroid_series.push_back(centroid);
 
-			    	visualization_msgs::Marker marker;
+                //standard deviation of the cluster in eigen vector direction
+                std::vector<float> feature_points;
+                float sum,mean,variance,stdDeviation;
+                for (size_t i=0; i<cloud_cluster->points.size();++i)
+                {
 
-			        marker.header.frame_id = "velodyne"; 
-			        marker.header.stamp = time_stamp; 
-			        marker.ns = "basic_shapes"; 
-			        marker.action = visualization_msgs::Marker::ADD; 
-			        marker.pose.orientation.w = 1.0; 
-			        marker.id = counter; 
-			        marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING; 
-			        marker.scale.z = 1; 
-			        marker.color.b = 1.0; 
-			        marker.color.g = 1.0; 
-			        marker.color.r = 1.0; 
-			        marker.color.a = 1.0;
-			        marker.lifetime = ros::Duration(0.5);
+                        float feature_point = cloud_cluster->points[i].x*eigenVectorsPCA(2,0)+cloud_cluster->points[i].y*eigenVectorsPCA(2,1)+cloud_cluster->points[i].z*eigenVectorsPCA(2,2);
+                        feature_points.push_back(feature_point);
+                }
 
-			        os.str("");
-			        os.clear();
+                for(size_t i=0; i< feature_points.size();++i)
+                {
+                    sum += feature_points[i];
+                }
+                mean = sum/feature_points.size();
 
-			        os << counter;
+                for(size_t i=0; i< feature_points.size();++i)
+                {
+                variance += pow(feature_points[i] - mean, 2);
+                }
+                variance=variance/feature_points.size();
+                stdDeviation = sqrt(variance);
+                std::cout<<stdDeviation<<std::endl;
 
-		    		marker.text = os.str();
 
-		            marker.pose.position.x = centroid[0];
-		            marker.pose.position.y = centroid[1];
-		            marker.pose.position.z = centroid[2];
+
+                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_))
+                {
+                    if((stdDeviation < std_high)&&(stdDeviation > std_low))
+                    {
+
+                        *cloud_clusters += *cloud_cluster;
+
+                        centroid_tmp[0] = centroid[0];
+                        centroid_tmp[1] = centroid[1];
+                        centroid_tmp[2] = centroid[2];
+
+                        if (first_add)
+                        {
+                                pre_track_targets.push_back(*cloud_cluster);
+                                track_targets.push_back(*cloud_cluster);
+
+                                centroid_series.push_back(centroid);
+
+                                visualization_msgs::Marker marker;
+
+                                marker.header.frame_id = "velodyne";
+                                marker.header.stamp = time_stamp;
+                                marker.ns = "basic_shapes";
+                                marker.action = visualization_msgs::Marker::ADD;
+                                marker.pose.orientation.w = 1.0;
+                                marker.id = counter;
+                                marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                                marker.scale.z = 1;
+                                marker.color.b = 1.0;
+                                marker.color.g = 1.0;
+                                marker.color.r = 1.0;
+                                marker.color.a = 1.0;
+                                marker.lifetime = ros::Duration(0.5);
+
+                                os.str("");
+                                os.clear();
+
+                                os << counter;
+
+                                marker.text = os.str();
+
+                            marker.pose.position.x = centroid[0];
+                            marker.pose.position.y = centroid[1];
+                            marker.pose.position.z = centroid[2];
 
                     record.push_back(marker);
 
-		            centroid_array.markers.push_back(marker);
+                            centroid_array.markers.push_back(marker);
 
                     file << marker.header.stamp << ", " << counter << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
-		    	}
-		    	else
-		    	{
-		    		track_targets.push_back(*cloud_cluster);
+                        }
+                        else
+                        {
+                                track_targets.push_back(*cloud_cluster);
 
-		    		current_centroid.push_back(centroid);
+                                current_centroid.push_back(centroid);
 
-		    	}
+                        }
 
-	    		counter++;
-			}
-		}
+                        counter++;
+                        }
+                }
+                feature_points.clear();
+                }
 
-		over_height = false;
+                over_height = false;
 
-		cloud_cluster->points.clear();
+                cloud_cluster->points.clear();
     }
 
     // clustering.setInputCloud(cloud_clusters);
@@ -514,70 +548,70 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
  //    if (!first_add)
  //    {
 
-	//     for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
-	//     {
-	//         pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
+        //     for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
+        //     {
+        //         pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
 
-	//         for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
-	//             cluster->points.push_back(cloud_clusters->points[*point]);
+        //         for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
+        //             cluster->points.push_back(cloud_clusters->points[*point]);
 
-	//         cluster->width = cluster->points.size();
-	//         cluster->height = 1;
-	//         cluster->is_dense = true;
+        //         cluster->width = cluster->points.size();
+        //         cluster->height = 1;
+        //         cluster->is_dense = true;
 
-	//         if (cluster->points.size() <= 0)
-	//             break;
+        //         if (cluster->points.size() <= 0)
+        //             break;
 
-	//   //       track_targets.push_back(*cluster);
+        //   //       track_targets.push_back(*cluster);
 
-	//   //       pcl::compute3DCentroid(*cluster, centroid);
+        //   //       pcl::compute3DCentroid(*cluster, centroid);
 
-	//   //       centroid_tmp[0] = centroid[0];
-	// 		// centroid_tmp[1] = centroid[1];
-	// 		// centroid_tmp[2] = centroid[2];
+        //   //       centroid_tmp[0] = centroid[0];
+        // 		// centroid_tmp[1] = centroid[1];
+        // 		// centroid_tmp[2] = centroid[2];
 
-	// 		// current_centroid.push_back(centroid_tmp);
+        // 		// current_centroid.push_back(centroid_tmp);
 
-	//         *sec_cloud_clusters += *cluster;
-	//     }
-	// }
+        //         *sec_cloud_clusters += *cluster;
+        //     }
+        // }
 
     if (!first_add)
     {
-    	//ICP_process(translate, cloud_clusters);
+        //ICP_process(translate, cloud_clusters);
 
-    	num = current_centroid.size();
+        num = current_centroid.size();
 
         label_list.clear();
 
-    	for (i = 0; i < num; i++)
-    	{
-    		idx = compareTarget(current_centroid[i], translate, track_targets[i]);
+        for (i = 0; i < num; i++)
+        {
+                idx = compareTarget(current_centroid[i], translate, track_targets[i]);
 
             labeled.push_back(idx);
 
-    		visualization_msgs::Marker marker;
+                visualization_msgs::Marker marker;
 
-	        marker.header.frame_id = "velodyne"; 
-	        marker.header.stamp = time_stamp; 
-	        marker.ns = "basic_shapes"; 
-	        marker.action = visualization_msgs::Marker::ADD; 
-	        marker.pose.orientation.w = 1.0; 
-	        marker.id = i; 
-	        marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING; 
-	        marker.scale.z = 1; 
-	        marker.color.b = 1.0; 
-	        marker.color.g = 1.0; 
-	        marker.color.r = 1.0; 
-	        marker.color.a = 1.0;
-	        marker.lifetime = ros::Duration(0.5);
+                marker.header.frame_id = "velodyne";
+                marker.header.stamp = time_stamp;
+                marker.ns = "basic_shapes";
+                marker.action = visualization_msgs::Marker::ADD;
+                marker.pose.orientation.w = 1.0;
+                marker.id = i;
+                marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                marker.scale.z = 1;
+                marker.color.b = 1.0;
+                marker.color.g = 1.0;
+                marker.color.r = 1.0;
+                marker.color.a = 1.0;
+                marker.lifetime = ros::Duration(0.5);
 
-	        os.str("");
-	        os.clear();
+                os.str("");
+                os.clear();
 
-	        os << idx;
+                os << idx;
 
-    		marker.text = os.str();
+                marker.text = os.str();
 
             marker.pose.position.x = current_centroid[i][0];
             marker.pose.position.y = current_centroid[i][1];
@@ -587,7 +621,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
             centroid_array.markers.push_back(marker);
             file << marker.header.stamp << ", " << idx << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
-    	}
+        }
 
     }
 
@@ -611,17 +645,17 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
 //===================================================================================================
 
-int compareTarget(Eigen::Vector4f centroid, 
-				  float* translate,
+int compareTarget(Eigen::Vector4f centroid,
+                                  float* translate,
                   pcl::PointCloud<pcl::PointXYZI> target)
 {
     static bool initialize = true;
 
     bool break_flag = false;
 
-	int i, j, idx, num_list;
+        int i, j, idx, num_list;
     int track_num = 0;
-	int traget_num = centroid_series.size();
+        int traget_num = centroid_series.size();
     int K = 1;
 
     double score;
@@ -629,13 +663,13 @@ int compareTarget(Eigen::Vector4f centroid,
 
     float min_distance = DBL_MAX;
 
-	Eigen::MatrixXf distance(1,1);
+        Eigen::MatrixXf distance(1,1);
     Eigen::MatrixXf substraction(1, 3);
     Eigen::Matrix3f covariance_matrix;
 
     _label tmp_label;
 
-	std::vector<float> centroid_tmp(3);
+        std::vector<float> centroid_tmp(3);
 
     std::vector<_label> target_label;
 
@@ -649,8 +683,8 @@ int compareTarget(Eigen::Vector4f centroid,
     std::vector<int> pointIdxNKNSearch(K);
     std::vector<float> pointNKNSquaredDistance(K);
 
-	for (i = 0; i < traget_num; i++)
-	{
+        for (i = 0; i < traget_num; i++)
+        {
 
         substraction(0,0) = (centroid[0] - (centroid_series[i][0]));
         substraction(0,1) = (centroid[1] - (centroid_series[i][1]));
@@ -660,8 +694,8 @@ int compareTarget(Eigen::Vector4f centroid,
 
         distance = substraction * covariance_matrix.inverse() * substraction.transpose();
 
-		if (distance(0,0) < 6.0f && distance(0,0) > 0.0f)
-		{
+                if (distance(0,0) < 6.0f && distance(0,0) > 0.0f)
+                {
             score = ICP_process(pre_track_targets[i], target);
 
             if (min_score > score)
@@ -680,8 +714,8 @@ int compareTarget(Eigen::Vector4f centroid,
                 // track_label[i].push_back(idx);
             }
 
-		}
-	}
+                }
+        }
 
 
 //    if (track_num > 0)
@@ -711,18 +745,18 @@ int compareTarget(Eigen::Vector4f centroid,
 //        }
 //    }
 
-	if (min_score > 0.2f)
-	{
-		idx = traget_num;
+        if (min_score > 0.2f)
+        {
+                idx = traget_num;
 
-		centroid_series.push_back(centroid);
+                centroid_series.push_back(centroid);
 
         pre_track_targets.push_back(target);
-	}
+        }
 
     initialize = false;
 
-	return idx;
+        return idx;
 
 }
 
@@ -740,17 +774,17 @@ void gateAssociation()
 
 
 double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
-				   pcl::PointCloud<pcl::PointXYZI>& target)
+                                   pcl::PointCloud<pcl::PointXYZI>& target)
 {
-	int i, j;
-	int pre_size, cur_size;
+        int i, j;
+        int pre_size, cur_size;
 
-	double max_score = DBL_MAX;
+        double max_score = DBL_MAX;
 
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
     pcl::PointCloud<pcl::PointXYZI> icp_result;
 
-	icp.setMaximumIterations (100);
+        icp.setMaximumIterations (100);
 
     icp.setInputSource(input.makeShared());
     icp.setInputTarget(target.makeShared());
@@ -769,14 +803,14 @@ double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
 
 void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
 {
-	int i, k, num_pts, number_targets;
+        int i, k, num_pts, number_targets;
 
-	sensor_msgs::PointCloud2 predict_cloud;
+        sensor_msgs::PointCloud2 predict_cloud;
 
-	pcl::PointCloud<pcl::PointXYZI>::Ptr predict_points (new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr predict_points (new pcl::PointCloud<pcl::PointXYZI>);
 
   std::cout << "receive predict" << std::endl;
-	number_targets = pre_track_targets.size();
+        number_targets = pre_track_targets.size();
 
   velocity[0] = msg->pose.pose.position.x;
   velocity[1] = msg->pose.pose.position.y;
@@ -785,44 +819,44 @@ void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
 
 
 
-	if (number_targets > 0)
-	{
-		for (i = 0; i < number_targets; i++)
-		{
-			num_pts = pre_track_targets[i].points.size();
+        if (number_targets > 0)
+        {
+                for (i = 0; i < number_targets; i++)
+                {
+                        num_pts = pre_track_targets[i].points.size();
 
-			for (k = 0; k < num_pts; k++)
-			{
+                        for (k = 0; k < num_pts; k++)
+                        {
         pre_track_targets[i].points[k].x -= velocity[0];
         pre_track_targets[i].points[k].y -= velocity[1];
-				pre_track_targets[i].points[k].z -= velocity[2];
-			}
+                                pre_track_targets[i].points[k].z -= velocity[2];
+                        }
 
-			*predict_points += pre_track_targets[i];
-		}
+                        *predict_points += pre_track_targets[i];
+                }
 
-	    pcl::toROSMsg(*predict_points, predict_cloud);
+            pcl::toROSMsg(*predict_points, predict_cloud);
 
-	    predict_cloud.header.frame_id = "velodyne";
+            predict_cloud.header.frame_id = "velodyne";
 
-	    predict_pub.publish(predict_cloud);
+            predict_pub.publish(predict_cloud);
 
-	}
+        }
 
-	number_targets = centroid_series.size();
+        number_targets = centroid_series.size();
 
-	for (i = 0; i < number_targets; i++)
-	{
-		centroid_series[i][0] -= 100*velocity[0];
-		centroid_series[i][1] -= 100*velocity[1];
-		centroid_series[i][2] -= velocity[2];
-	}
+        for (i = 0; i < number_targets; i++)
+        {
+                centroid_series[i][0] -= 100*velocity[0];
+                centroid_series[i][1] -= 100*velocity[1];
+                centroid_series[i][2] -= velocity[2];
+        }
 
 }
 
 //===================================================================================================
 
-int main(int argc, char **argv) 
+int main(int argc, char **argv)
 {
     std::string folder_path;
 
@@ -839,6 +873,8 @@ int main(int argc, char **argv)
     nh.param<double>("matrix_11_",matrix_11_,500);
     nh.param<double>("matrix_20",matrix_20,500);
     nh.param<double>("matrix_21",matrix_21,500);
+    nh.param<double>("std_low",std_low,0);
+    nh.param<double>("std_high",std_high,500);
     image_transport::ImageTransport it(nh);
 
     line_strip_odom.header.frame_id = "velodyne";
@@ -849,9 +885,9 @@ int main(int argc, char **argv)
     line_strip_odom.color.a = 1.0;
 
     guess << 1, 0, 0, 0,
-	         0, 1, 0, 0,
-	         0, 0, 1, 0,
-	         0, 0, 0, 1;
+                 0, 1, 0, 0,
+                 0, 0, 1, 0,
+                 0, 0, 0, 1;
 
     plane_filtered_pub = nh.advertise<sensor_msgs::PointCloud2 >("plane_filtered_pub_points", 1000);
     cluster_pub        = nh.advertise<sensor_msgs::PointCloud2 >("cluster_cloud", 1000);
@@ -876,7 +912,7 @@ int main(int argc, char **argv)
 
     initializeGlobalParams();
     ros::Rate loop_rate(10);
-    while (ros::ok()) 
+    while (ros::ok())
     {
         loop_rate.sleep();
         ros::spinOnce();
