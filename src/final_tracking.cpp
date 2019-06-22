@@ -13,6 +13,8 @@
 #include <math.h>
 #include <fstream>
 #include <sstream>
+#include <queue>
+#include <mutex>
 
 #include <ros/ros.h>
 #include <ros/package.h>
@@ -100,25 +102,6 @@ double std_high;
 
 // ParticleFilter::Ptr tracker_;
 
-
-typedef struct _track_pattern_{
-
-    std::vector<float> centroid;
-
-    pcl::PointCloud<pcl::PointXYZI> point_cloud;
-
-}_track_pattern;
-
-typedef struct _label_{
-
-    int index;
-
-    float distance;
-
-    double score;
-
-}_label;
-
 /* Private variable */
 //====================================================================================================
 
@@ -142,34 +125,38 @@ ros::Publisher markerArrayPub;
 
 image_transport::Publisher image_pub;
 
-Eigen::Matrix4f guess;
-
 cv_bridge::CvImagePtr cv_ptr;
 
 darknet_ros_msgs::BoundingBoxes result_boxes;
 
 visualization_msgs::Marker line_strip_odom, line_strip_ekf_odom;
 
-pcl::PointCloud<pcl::PointXYZI>::Ptr prev_scan (new pcl::PointCloud<pcl::PointXYZI> );
+std::vector<Eigen::Vector4f> target_cen;
+std::vector<Eigen::Vector4f> obser_cen;
 
-std::vector<Eigen::Vector4f> centroid_series;
-std::vector<Eigen::Vector4f> current_centroid;
+std::vector<int> new_track_list;
+std::vector<int> candidate_list;
 
-std::vector<std::vector<int> > track_label;
+std::vector<int> miss_track_count;
 
-std::vector<int > label_list;
-
-std::vector<pcl::PointCloud<pcl::PointXYZI> > pre_track_targets;
 std::vector<pcl::PointCloud<pcl::PointXYZI> > track_targets;
+std::vector<pcl::PointCloud<pcl::PointXYZI> > obser_targets;
 
-std::vector<_track_pattern> track_patterns;
+std::queue<nav_msgs::Odometry::ConstPtr> odom_buffer;
 
-std::vector<visualization_msgs::Marker> record;
+std::mutex mutex;
 
 std::ofstream file;
 
 //===================================================================================================
 
+typedef struct _label_{
+
+    double score;
+
+    float distance;
+
+}_label;
 
 
 /* Private function */
@@ -184,16 +171,18 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg);
 void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
                 ros::Time&                                  time_stamp);
 
-void updateTarget(const nav_msgs::Odometry::ConstPtr& msg);
+void updateTarget();
 
-int compareTarget(Eigen::Vector4f centroid,
-                  float* translate,
-                  pcl::PointCloud<pcl::PointXYZI> target);
+void formNewTrack();
 
-void gateAssociation();
+bool compareTarget(const int& target_idx);
+
+void Odom_callback(const nav_msgs::Odometry::ConstPtr& msg);
 
 double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
                  pcl::PointCloud<pcl::PointXYZI>& target);
+
+
 
 //===================================================================================================
 
@@ -285,19 +274,13 @@ void matching_method(const sensor_msgs::ImageConstPtr& msg)
 
 //===================================================================================================
 
-void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
+void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg) 
 {
     ros::Time time_stamp = msg->header.stamp;
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
     fromROSMsg(*msg, *cloud);
 
-    /// Filter points
-    pcl::VoxelGrid<pcl::PointXYZI> vg;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZI>);
-    vg.setInputCloud (cloud);
-    vg.setLeafSize (0.1f, 0.1f, 0.1f);
-    vg.filter (*cloud_filtered);
 
     /// Set weights of segmenting ground points
     Eigen::Vector3f axis = Eigen::Vector3f(0.0,1.0,0.0);
@@ -316,16 +299,16 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
     seg.setDistanceThreshold (0.5);
 
     // Segment ground plane
-    seg.setInputCloud (cloud_filtered);
+    seg.setInputCloud (cloud);
     seg.segment (*inliers, *coefficients);
-    if (inliers->indices.size () == 0)
+    if (inliers->indices.size () == 0) 
     {
         std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
     }
 
     // Extract the plane inliers from the input cloud
     pcl::ExtractIndices<pcl::PointXYZI> extract;
-    extract.setInputCloud (cloud_filtered);
+    extract.setInputCloud (cloud);
     extract.setIndices (inliers);
     extract.setNegative (false);
 
@@ -336,15 +319,15 @@ void ground_removal(const sensor_msgs::PointCloud2::ConstPtr &msg)
     // Remove the planar inliers, extract the rest
     extract.setNegative (true);
     extract.filter (*cloud_f);
-    *cloud_filtered = *cloud_f;
+    *cloud = *cloud_f;
 
     sensor_msgs::PointCloud2 filtered_cloud;
-    pcl::toROSMsg(*cloud_filtered, filtered_cloud);
+    pcl::toROSMsg(*cloud, filtered_cloud);
     filtered_cloud.header.frame_id = "velodyne";
     plane_filtered_pub.publish(filtered_cloud);
 
-
-    clustering(cloud_filtered, time_stamp);
+    
+    clustering(cloud, time_stamp);
 }
 
 //===================================================================================================
@@ -353,16 +336,23 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
                 ros::Time&                                  time_stamp)
 {
     int j = 50;
-    int i, idx, num;
+    int k = 0;
+    int i, idx, num, m;
+    int obser_size;
+
     int counter = 0;
-    float translate[3] = {0, 0, 0};
+
     static bool first_add = true;
+
     bool over_height = false;
-    std::vector<float> centroid_tmp(3);
+    bool ret;
+
     std::vector<pcl::PointIndices> cluster_indices;
-    std::vector<int> labeled;
+
     std::ostringstream os;
+
     Eigen::Matrix3f covariance_matrix;
+
     Eigen::Vector4f centroid;
 
     sensor_msgs::PointCloud2 clustered_cloud;
@@ -373,22 +363,8 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_clusters (new pcl::PointCloud<pcl::PointXYZI>);
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_cluster  (new pcl::PointCloud<pcl::PointXYZI>);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr sec_cloud_clusters (new pcl::PointCloud<pcl::PointXYZI>);
 
     pcl::search::KdTree<pcl::PointXYZI>::Ptr tree       (new pcl::search::KdTree<pcl::PointXYZI>);
-
-    pcl::MinCutSegmentation<pcl::PointXYZI> clustering;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr foregroundPoints(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::PointXYZI point;
-    point.x = 100.0;
-    point.y = 100.0;
-    point.z = 100.0;
-    foregroundPoints->points.push_back(point);
-    clustering.setForegroundPoints(foregroundPoints);
-    clustering.setSigma(0.02);
-    clustering.setRadius(0.01);
-    clustering.setNumberOfNeighbours(20);
-    clustering.setSourceWeight(0.6);
 
     std::vector <pcl::PointIndices> clusters;
 
@@ -401,9 +377,8 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
     euclidean_cluster.setInputCloud (cloud_filtered);
     euclidean_cluster.extract (cluster_indices);
 
-
-    track_targets.clear();
-    current_centroid.clear();
+    obser_targets.clear();
+    obser_cen.clear();
 
     for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
     {
@@ -414,7 +389,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
                 cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
 
-                if (cloud_filtered->points[*pit].z > 1.2f)
+                if (cloud_filtered->points[*pit].z > 0.2f)
                 {
                         over_height = true;
 
@@ -433,197 +408,178 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
                 //PCA
                 pcl::compute3DCentroid(*cloud_cluster, centroid);
                 pcl::computeCovarianceMatrix (*cloud_cluster, centroid, covariance_matrix);
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
-                Eigen::Matrix3f eigenVectorsPCA = eigen_solver.eigenvectors();
-                Eigen::Vector3f eigenValuesPCA = eigen_solver.eigenvalues();
+                // Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
+                // Eigen::Matrix3f eigenVectorsPCA = eigen_solver.eigenvectors();
+                // Eigen::Vector3f eigenValuesPCA = eigen_solver.eigenvalues();
 
 
-                Eigen::Matrix4f transform(Eigen::Matrix4f::Identity());
-                transform.block<3, 3>(0, 0) = eigenVectorsPCA.transpose();
-                transform.block<3, 1>(0, 3) = -1.0f * (transform.block<3,3>(0,0)) * (centroid.head<3>());
+                // Eigen::Matrix4f transform(Eigen::Matrix4f::Identity());
+                // transform.block<3, 3>(0, 0) = eigenVectorsPCA.transpose();
+                // transform.block<3, 1>(0, 3) = -1.0f * (transform.block<3,3>(0,0)) * (centroid.head<3>());
 
-                pcl::PointCloud<pcl::PointXYZI>::Ptr transformedCloud(new pcl::PointCloud<pcl::PointXYZI>);
-                pcl::transformPointCloud(*cloud_cluster, *transformedCloud, transform);
+                // pcl::PointCloud<pcl::PointXYZI>::Ptr transformedCloud(new pcl::PointCloud<pcl::PointXYZI>);
+                // pcl::transformPointCloud(*cloud_cluster, *transformedCloud, transform);
 
 
-                //standard deviation of the cluster in eigen vector direction
-                std::vector<float> feature_points;
-                float sum,mean,variance,stdDeviation;
-                for (size_t i=0; i<cloud_cluster->points.size();++i)
+                // //standard deviation of the cluster in eigen vector direction
+                // std::vector<float> feature_points;
+                // float sum,mean,variance,stdDeviation;
+                // for (size_t i=0; i<cloud_cluster->points.size();++i)
+                // {
+
+                //         float feature_point = cloud_cluster->points[i].x*eigenVectorsPCA(2,0)+cloud_cluster->points[i].y*eigenVectorsPCA(2,1)+cloud_cluster->points[i].z*eigenVectorsPCA(2,2);
+                //         feature_points.push_back(feature_point);
+                // }
+
+                // for(size_t i=0; i< feature_points.size();++i)
+                // {
+                //     sum += feature_points[i];
+                // }
+                // mean = sum/feature_points.size();
+
+                // for(size_t i=0; i< feature_points.size();++i)
+                // {
+                // variance += pow(feature_points[i] - mean, 2);
+                // }
+                // variance=variance/feature_points.size();
+                // stdDeviation = sqrt(variance);
+                // std::cout<<stdDeviation<<std::endl;
+
+
+
+                if (true)//(abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
                 {
-
-                        float feature_point = cloud_cluster->points[i].x*eigenVectorsPCA(2,0)+cloud_cluster->points[i].y*eigenVectorsPCA(2,1)+cloud_cluster->points[i].z*eigenVectorsPCA(2,2);
-                        feature_points.push_back(feature_point);
-                }
-
-                for(size_t i=0; i< feature_points.size();++i)
-                {
-                    sum += feature_points[i];
-                }
-                mean = sum/feature_points.size();
-
-                for(size_t i=0; i< feature_points.size();++i)
-                {
-                variance += pow(feature_points[i] - mean, 2);
-                }
-                variance=variance/feature_points.size();
-                stdDeviation = sqrt(variance);
-                std::cout<<stdDeviation<<std::endl;
-
-
-
-                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
-                {
-                    if((stdDeviation < std_high)&&(stdDeviation > std_low))
+                    if(true)//stdDeviation < std_high)&&(stdDeviation > std_low))
                     {
-
-                        *cloud_clusters += *cloud_cluster;
-
-                        centroid_tmp[0] = centroid[0];
-                        centroid_tmp[1] = centroid[1];
-                        centroid_tmp[2] = centroid[2];
+                        
 
                         if (first_add)
                         {
-                                pre_track_targets.push_back(*cloud_cluster);
-                                track_targets.push_back(*cloud_cluster);
+                            *cloud_clusters += *cloud_cluster;
 
-                                centroid_series.push_back(centroid);
+                            track_targets.push_back(*cloud_cluster);
+                        
+                            target_cen.push_back(centroid);
 
-                                visualization_msgs::Marker marker;
+                            visualization_msgs::Marker marker;
 
-                                marker.header.frame_id = "velodyne";
-                                marker.header.stamp = time_stamp;
-                                marker.ns = "basic_shapes";
-                                marker.action = visualization_msgs::Marker::ADD;
-                                marker.pose.orientation.w = 1.0;
-                                marker.id = counter;
-                                marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-                                marker.scale.z = 1;
-                                marker.color.b = 1.0;
-                                marker.color.g = 1.0;
-                                marker.color.r = 1.0;
-                                marker.color.a = 1.0;
-                                marker.lifetime = ros::Duration(0.5);
+                            marker.header.frame_id = "velodyne"; 
+                            marker.header.stamp = time_stamp; 
+                            marker.ns = "basic_shapes"; 
+                            marker.action = visualization_msgs::Marker::ADD; 
+                            marker.pose.orientation.w = 1.0; 
+                            marker.id = counter; 
+                            marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING; 
+                            marker.scale.z = 3; 
+                            marker.color.b = 1.0; 
+                            marker.color.g = 1.0; 
+                            marker.color.r = 1.0; 
+                            marker.color.a = 1.0;
+                            marker.lifetime = ros::Duration(0.5);
 
-                                os.str("");
-                                os.clear();
+                            os.str("");
+                            os.clear();
 
-                                os << counter;
+                            os << counter;
 
-                                marker.text = os.str();
+                            marker.text = os.str();
 
                             marker.pose.position.x = centroid[0];
                             marker.pose.position.y = centroid[1];
                             marker.pose.position.z = centroid[2];
 
-                    record.push_back(marker);
-
                             centroid_array.markers.push_back(marker);
 
-                    file << marker.header.stamp << ", " << counter << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
+                            file << marker.header.stamp << ", " << counter << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
+                            
+                            counter++;
+                    
                         }
                         else
                         {
-                                track_targets.push_back(*cloud_cluster);
+                            *cloud_clusters += *cloud_cluster;
 
-                                current_centroid.push_back(centroid);
+                            obser_targets.push_back(*cloud_cluster);
 
+                            obser_cen.push_back(centroid);
                         }
 
                         counter++;
+
                         }
                 }
-                feature_points.clear();
-                }
 
-                over_height = false;
+                //feature_points.clear();
 
-                cloud_cluster->points.clear();
+            }
+
+            over_height = false;
+
+            cloud_cluster->points.clear();
     }
-
-    // clustering.setInputCloud(cloud_clusters);
-    // clustering.extract(clusters);
-
- //    if (!first_add)
- //    {
-
-        //     for (std::vector<pcl::PointIndices>::const_iterator i = clusters.begin(); i != clusters.end(); ++i)
-        //     {
-        //         pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
-
-        //         for (std::vector<int>::const_iterator point = i->indices.begin(); point != i->indices.end(); point++)
-        //             cluster->points.push_back(cloud_clusters->points[*point]);
-
-        //         cluster->width = cluster->points.size();
-        //         cluster->height = 1;
-        //         cluster->is_dense = true;
-
-        //         if (cluster->points.size() <= 0)
-        //             break;
-
-        //   //       track_targets.push_back(*cluster);
-
-        //   //       pcl::compute3DCentroid(*cluster, centroid);
-
-        //   //       centroid_tmp[0] = centroid[0];
-        // 		// centroid_tmp[1] = centroid[1];
-        // 		// centroid_tmp[2] = centroid[2];
-
-        // 		// current_centroid.push_back(centroid_tmp);
-
-        //         *sec_cloud_clusters += *cluster;
-        //     }
-        // }
 
     if (!first_add)
     {
         //ICP_process(translate, cloud_clusters);
 
-        num = current_centroid.size();
+        candidate_list.clear();
+        new_track_list.clear();
 
-        label_list.clear();
+        obser_size = obser_cen.size();
+
+        new_track_list.resize(obser_size);
+
+        for (m = 0; m < obser_size; m++)
+        {
+            new_track_list[m] = 0;
+        }
+
+        num = target_cen.size();
 
         for (i = 0; i < num; i++)
         {
-                idx = compareTarget(current_centroid[i], translate, track_targets[i]);
+            ret = compareTarget(i);
 
-            labeled.push_back(idx);
+            visualization_msgs::Marker marker;
 
-                visualization_msgs::Marker marker;
+            marker.header.frame_id = "velodyne"; 
+            marker.header.stamp = time_stamp; 
+            marker.ns = "basic_shapes"; 
+            marker.action = visualization_msgs::Marker::ADD; 
+            marker.pose.orientation.w = 1.0; 
+            marker.id = i; 
+            marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING; 
+            marker.scale.z = 3; 
+            marker.color.b = 1.0; 
+            marker.color.g = 1.0; 
+            marker.color.r = 1.0; 
+            marker.color.a = 1.0;
+            marker.lifetime = ros::Duration(0.5);
 
-                marker.header.frame_id = "velodyne";
-                marker.header.stamp = time_stamp;
-                marker.ns = "basic_shapes";
-                marker.action = visualization_msgs::Marker::ADD;
-                marker.pose.orientation.w = 1.0;
-                marker.id = i;
-                marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-                marker.scale.z = 1;
-                marker.color.b = 1.0;
-                marker.color.g = 1.0;
-                marker.color.r = 1.0;
-                marker.color.a = 1.0;
-                marker.lifetime = ros::Duration(0.5);
+            os.str("");
+            os.clear();
 
-                os.str("");
-                os.clear();
+            os << i;
 
-                os << idx;
+            marker.text = os.str();
 
-                marker.text = os.str();
+            marker.pose.position.x = target_cen[i][0];
+            marker.pose.position.y = target_cen[i][1];
+            marker.pose.position.z = target_cen[i][2];
 
-            marker.pose.position.x = current_centroid[i][0];
-            marker.pose.position.y = current_centroid[i][1];
-            marker.pose.position.z = current_centroid[i][2];
+            if (ret)
+            {
+                centroid_array.markers.push_back(marker);
+                file << marker.header.stamp << ", " << i << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
 
-            record.push_back(marker);
-
-            centroid_array.markers.push_back(marker);
-            file << marker.header.stamp << ", " << idx << ", " << marker.pose.position.x << ", " << marker.pose.position.y << ", " << marker.pose.position.z << "\n";
+            }
         }
 
     }
+
+    formNewTrack();
+
+    updateTarget();
 
     pcl::toROSMsg(*cloud_clusters, clustered_cloud);
 
@@ -633,158 +589,189 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
     markerArrayPub.publish(centroid_array);
 
-    pcl::copyPointCloud(*cloud_clusters, *prev_scan);
-
-    if (first_add)
-    {
-        track_label.resize(track_targets.size());
-    }
 
     first_add = false;
 }
 
 //===================================================================================================
 
-int compareTarget(Eigen::Vector4f centroid,
-                                  float* translate,
-                  pcl::PointCloud<pcl::PointXYZI> target)
+bool compareTarget(const int& target_idx)
 {
-    static bool initialize = true;
-
+    bool tracked = false;
     bool break_flag = false;
+    bool ret = false;
 
-        int i, j, idx, num_list;
-    int track_num = 0;
-        int traget_num = centroid_series.size();
+    static int counter = 0;
+
+    const float score_thres = 0.1f;
+
+    int i, j, closet_idx, remove_num;
+    int obser_num, hypothesis_num = 0;
     int K = 1;
+
+    float abs_dis;
 
     double score;
     double min_score = DBL_MAX;
 
-    float min_distance = DBL_MAX;
+    double min_distance = DBL_MAX;
 
-        Eigen::MatrixXf distance(1,1);
+    Eigen::Matrix2f distance;
     Eigen::MatrixXf substraction(1, 3);
     Eigen::Matrix3f covariance_matrix;
 
-    _label tmp_label;
-
-        std::vector<float> centroid_tmp(3);
-
-    std::vector<_label> target_label;
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr tree (new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-
     pcl::PointXYZ searchPoint;
-
-    num_list = label_list.size();
 
     std::vector<int> pointIdxNKNSearch(K);
     std::vector<float> pointNKNSquaredDistance(K);
 
-        for (i = 0; i < traget_num; i++)
+    _label label_buffer;
+
+    std::vector<_label> candidate;
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tree (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+
+    obser_num = obser_targets.size();
+
+    remove_num = candidate_list.size();
+
+    for (i = 0; i < obser_num; i++)
+    {
+        break_flag = false;
+
+        for (j = 0; j < remove_num; j++)
         {
-
-        substraction(0,0) = (centroid[0] - (centroid_series[i][0]));
-        substraction(0,1) = (centroid[1] - (centroid_series[i][1]));
-        substraction(0,2) = (centroid[2] - (centroid_series[i][2]));
-
-        pcl::computeCovarianceMatrix (pre_track_targets[i], centroid_series[i], covariance_matrix);
-
-        distance = substraction * covariance_matrix.inverse() * substraction.transpose();
-
-                if (distance(0,0) < 6.0f && distance(0,0) > 0.0f)
-                {
-            score = ICP_process(pre_track_targets[i], target);
-
-            if (min_score > score)
+            if (candidate_list[j] == i)
             {
-                min_score = score;
-                idx = i;
+                break_flag = true;
 
-                tmp_label.index = i;
-                tmp_label.score = score;
-                tmp_label.distance = abs(distance(0,0));
-
-                target_label.push_back(tmp_label);
-
-                track_num++;
-
-                // track_label[i].push_back(idx);
+                new_track_list[i] = 0;
             }
-
-                }
         }
 
-
-//    if (track_num > 0)
-//    {
-
-//        tree->width = track_num;
-//        tree->height = 1;
-
-//        tree->points.resize(track_num);
-
-//        for (i = 0; i < track_num; i++)
-//        {
-//            tree->points[i].x = target_label[i].score;
-//            tree->points[i].y = target_label[i].score;
-//            tree->points[i].z = target_label[i].score;
-//        }
-
-//        searchPoint.x = 0.0f;
-//        searchPoint.y = 0.0f;
-//        searchPoint.z = 0.0f;
-
-//        kdtree.setInputCloud (tree);
-
-//        if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
-//        {
-//            idx = pointIdxNKNSearch[0];
-//        }
-//    }
-
-        if (min_score > 0.2f)
+        if (!break_flag)
         {
-                idx = traget_num;
+            substraction(0,0) = (obser_cen[i][0] - (target_cen[target_idx][0]));
+            substraction(0,1) = (obser_cen[i][1] - (target_cen[target_idx][1]));
+            substraction(0,2) = (obser_cen[i][2] - (target_cen[target_idx][2]));
 
-                centroid_series.push_back(centroid);
+            pcl::computeCovarianceMatrix (track_targets[target_idx], target_cen[target_idx], covariance_matrix);
 
-        pre_track_targets.push_back(target);
+            //distance = substraction * covariance_matrix.inverse() * substraction.transpose();
+
+            distance(0,0) = fabs(substraction(0,0) + substraction(0,1) + substraction(0,2));
+
+            abs_dis = (distance(0, 0) > 0.0f) ? distance(0,0) : -distance(0,0);
+
+            // if (abs_dis > 1.5f && abs_dis < 2.0f)
+            // {
+            //     new_track_list[i]++;
+            // }
+
+            if (abs_dis < 2.5f)
+            {
+                score = ICP_process(track_targets[target_idx], obser_targets[i]);
+
+                new_track_list[i]++;
+
+                if (min_score > score)
+                {
+                    min_distance = abs_dis;
+
+                    min_score = score;
+
+                    closet_idx = i;
+
+                    label_buffer.score = min_score;
+                    label_buffer.distance = min_distance;
+
+                    candidate.push_back(label_buffer);
+
+                    hypothesis_num++;
+                }
+
+                if (score < 0.5f)
+                {
+                    new_track_list[i]++;
+                }
+            }
+        }
+    }
+
+    std::cout << counter << " : " << min_distance << "\t" << min_score <<std::endl;
+
+
+    if (min_score < 3.0f)
+    {
+        target_cen[target_idx] = obser_cen[closet_idx];
+
+        pcl::copyPointCloud(obser_targets[closet_idx], track_targets[target_idx]);
+
+        candidate_list.push_back(closet_idx);
+
+        //obser_targets.erase(obser_targets.begin() + closet_idx);
+
+        //obser_cen.erase(obser_cen.begin() + closet_idx);
+
+        ret = true;
+    }
+
+    counter++;
+
+
+    return ret;
+}
+
+//===================================================================================================
+
+void formNewTrack()
+{
+    int i, obser_num;
+    int threshold;
+
+    obser_num = (int)new_track_list.size();
+
+    threshold = int(0.1 * (float)track_targets.size());
+
+    for (i = 0; i < obser_num; i++)
+    {
+        if (new_track_list[i] > threshold)
+        {
+            track_targets.push_back(obser_targets[i]);
+
+            target_cen.push_back(obser_cen[i]);
         }
 
-    initialize = false;
-
-        return idx;
+    }
 
 }
 
 //===================================================================================================
 
-void gateAssociation()
+void Odom_callback(const nav_msgs::Odometry::ConstPtr& msg)
 {
+    mutex.lock();
 
+    odom_buffer.push(msg);
 
-
-
+    mutex.unlock();
 }
-
 //===================================================================================================
 
 
 double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
-                                   pcl::PointCloud<pcl::PointXYZI>& target)
+                   pcl::PointCloud<pcl::PointXYZI>& target)
 {
-        int i, j;
-        int pre_size, cur_size;
+    int i, j;
+    int pre_size, cur_size;
 
-        double max_score = DBL_MAX;
+    double max_score = DBL_MAX;
 
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
     pcl::PointCloud<pcl::PointXYZI> icp_result;
 
-        icp.setMaximumIterations (100);
+    icp.setMaximumIterations (100);
 
     icp.setInputSource(input.makeShared());
     icp.setInputTarget(target.makeShared());
@@ -801,39 +788,47 @@ double ICP_process(pcl::PointCloud<pcl::PointXYZI>& input,
 
 //===================================================================================================
 
-void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
+void updateTarget()
 {
-        int i, k, num_pts, number_targets;
+    int i, k, num_pts, number_targets;
 
-        sensor_msgs::PointCloud2 predict_cloud;
+    sensor_msgs::PointCloud2 predict_cloud;
 
-        pcl::PointCloud<pcl::PointXYZI>::Ptr predict_points (new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr predict_points (new pcl::PointCloud<pcl::PointXYZI>);
 
-  std::cout << "receive predict" << std::endl;
-        number_targets = pre_track_targets.size();
+    if (!odom_buffer.empty())
 
-  velocity[0] = msg->pose.pose.position.x;
-  velocity[1] = msg->pose.pose.position.y;
-  velocity[2] = msg->pose.pose.position.z;
+    {
 
+        //std::cout << "receive predict" << std::endl;
 
+        number_targets = track_targets.size();
 
+        mutex.lock();
+
+        velocity[0] = odom_buffer.front()->pose.pose.position.x;
+        velocity[1] = odom_buffer.front()->pose.pose.position.y;
+        velocity[2] = odom_buffer.front()->pose.pose.position.z;
+
+        odom_buffer.pop();
+
+        mutex.unlock();;
 
         if (number_targets > 0)
         {
-                for (i = 0; i < number_targets; i++)
+            for (i = 0; i < number_targets; i++)
+            {
+                num_pts = track_targets[i].points.size();
+
+                for (k = 0; k < num_pts; k++)
                 {
-                        num_pts = pre_track_targets[i].points.size();
-
-                        for (k = 0; k < num_pts; k++)
-                        {
-        pre_track_targets[i].points[k].x -= velocity[0];
-        pre_track_targets[i].points[k].y -= velocity[1];
-                                pre_track_targets[i].points[k].z -= velocity[2];
-                        }
-
-                        *predict_points += pre_track_targets[i];
+                    track_targets[i].points[k].x -= velocity[0];
+                    track_targets[i].points[k].y -= velocity[1];
+                    track_targets[i].points[k].z -= velocity[2];
                 }
+
+                *predict_points += track_targets[i];
+            }
 
             pcl::toROSMsg(*predict_points, predict_cloud);
 
@@ -843,14 +838,17 @@ void updateTarget(const nav_msgs::Odometry::ConstPtr& msg)
 
         }
 
-        number_targets = centroid_series.size();
+        number_targets = target_cen.size();
 
         for (i = 0; i < number_targets; i++)
         {
-                centroid_series[i][0] -= 100*velocity[0];
-                centroid_series[i][1] -= 100*velocity[1];
-                centroid_series[i][2] -= velocity[2];
+            target_cen[i][0] -= velocity[0];
+            target_cen[i][1] -= velocity[1];
+            target_cen[i][2] -= velocity[2];
         }
+
+
+    }
 
 }
 
@@ -884,11 +882,6 @@ int main(int argc, char **argv)
     line_strip_odom.color.r = 1.0;
     line_strip_odom.color.a = 1.0;
 
-    guess << 1, 0, 0, 0,
-                 0, 1, 0, 0,
-                 0, 0, 1, 0,
-                 0, 0, 0, 1;
-
     plane_filtered_pub = nh.advertise<sensor_msgs::PointCloud2 >("plane_filtered_pub_points", 1000);
     cluster_pub        = nh.advertise<sensor_msgs::PointCloud2 >("cluster_cloud", 1000);
 
@@ -901,7 +894,7 @@ int main(int argc, char **argv)
     image_pub          = it.advertise("/camera/output", 1);
 
     ros::Subscriber lidar_sub   = nh.subscribe("/points_transform", 100, ground_removal);
-    ros::Subscriber imu_vel_sub = nh.subscribe("/predict/pos2", 100, updateTarget);
+    ros::Subscriber imu_vel_sub = nh.subscribe("/predict/pos2", 100, Odom_callback);
 
     folder_path = ros::package::getPath("final_tracking");
     folder_path += "/output.csv";
