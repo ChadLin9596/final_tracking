@@ -472,7 +472,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
 
 
-                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_))
+                if ((abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
                 {
                     if((stdDeviation < std_high)&&(stdDeviation > std_low))
                     {
