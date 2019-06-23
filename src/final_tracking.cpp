@@ -699,7 +699,7 @@ bool compareTarget(const int& target_idx)
         }
     }
 
-    std::cout << counter << " : " << min_distance << "\t" << min_score <<std::endl;
+    //std::cout << counter << " : " << min_distance << "\t" << min_score <<std::endl;
 
 
     if (min_score < 5.0f)
