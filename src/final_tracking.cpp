@@ -447,7 +447,7 @@ void clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud_filtered,
 
 
 
-                if (true)//(abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
+                if ((abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,0)) < matrix_00_))//(abs(covariance_matrix(0,0)) > matrix_00) && (abs(covariance_matrix(0,0)) < matrix_00_) && (abs(covariance_matrix(1,1)) > matrix_11) && (abs(covariance_matrix(1,1)) < matrix_11_) && (abs(covariance_matrix(0,1)) > matrix_01) && (abs(covariance_matrix(1,0)) > matrix_10) && (abs(covariance_matrix(2,0)) > matrix_20) && (abs(covariance_matrix(2,1)) > matrix_21))
                 {
                     if(true)//stdDeviation < std_high)&&(stdDeviation > std_low))
                     {
@@ -660,7 +660,7 @@ bool compareTarget(const int& target_idx)
 
             //distance = substraction * covariance_matrix.inverse() * substraction.transpose();
 
-            distance(0,0) = fabs(substraction(0,0) + substraction(0,1) + substraction(0,2));
+            distance(0,0) = fabs(substraction(0,0) + substraction(0,1));
 
             abs_dis = (distance(0, 0) > 0.0f) ? distance(0,0) : -distance(0,0);
 
@@ -669,13 +669,13 @@ bool compareTarget(const int& target_idx)
             //     new_track_list[i]++;
             // }
 
-            if (abs_dis < 2.5f)
+            if (abs_dis < 3.0f)
             {
                 score = ICP_process(track_targets[target_idx], obser_targets[i]);
 
                 new_track_list[i]++;
 
-                if (min_score > score)
+                if (min_score > score && abs_dis < 2.0f)
                 {
                     min_distance = abs_dis;
 
@@ -702,7 +702,7 @@ bool compareTarget(const int& target_idx)
     std::cout << counter << " : " << min_distance << "\t" << min_score <<std::endl;
 
 
-    if (min_score < 3.0f)
+    if (min_score < 5.0f)
     {
         target_cen[target_idx] = obser_cen[closet_idx];
 
