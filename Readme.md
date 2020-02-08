@@ -1,7 +1,7 @@
 # SDC Final Competition - Group 5
 ## 組員
-* 0751081 陳靖雯
-* 0751903 林春榮
+* 0751081 陳靖雯 Ching-Wen Chen
+* 0751903 林春榮 Chun-Jong Lin
 * 0751906 黃偉嘉
 
 ## 操作
